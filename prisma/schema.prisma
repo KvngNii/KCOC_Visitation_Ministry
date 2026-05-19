@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  password      String
+  role          String    @default("USHER")
+  zoneId        String?
+  communityId   String?
+  zone          Zone?     @relation(fields: [zoneId], references: [id])
+  community     Community? @relation(fields: [communityId], references: [id])
+  attendanceRecorded  Attendance[]   @relation("RecordedBy")
+  visitationLogs      VisitationLog[] @relation("VisitedBy")
+  brothersKeeperLogs  BrothersKeeperLog[] @relation("CheckedBy")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Zone {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  communities Community[]
+  members     Member[]
+  users       User[]
+  createdAt   DateTime    @default(now())
+}
+
+model Community {
+  id        String    @id @default(cuid())
+  name      String
+  zoneId    String
+  zone      Zone      @relation(fields: [zoneId], references: [id])
+  members   Member[]
+  users     User[]
+  createdAt DateTime  @default(now())
+
+  @@unique([name, zoneId])
+}
+
+model Ministry {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  members   Member[]
+  createdAt DateTime  @default(now())
+}
+
+model Member {
+  id               String     @id @default(cuid())
+  churchNumber     String     @unique
+  firstName        String
+  lastName         String
+  phone            String?
+  address          String?
+  gender           String
+  employmentStatus String?
+  photoUrl         String?
+  status           String     @default("ACTIVE")
+  zoneId           String
+  communityId      String?
+  ministryId       String?
+  zone             Zone       @relation(fields: [zoneId], references: [id])
+  community        Community? @relation(fields: [communityId], references: [id])
+  ministry         Ministry?  @relation(fields: [ministryId], references: [id])
+  attendances      Attendance[]
+  visitationLogs   VisitationLog[]
+  brothersKeeperLogs BrothersKeeperLog[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+}
+
+model ServiceType {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  dayOfWeek   Int?
+  isActive    Boolean      @default(true)
+  attendances Attendance[]
+  sessions    ServiceSession[]
+  createdAt   DateTime     @default(now())
+}
+
+model ServiceSession {
+  id            String       @id @default(cuid())
+  serviceTypeId String
+  date          DateTime
+  notes         String?
+  serviceType   ServiceType  @relation(fields: [serviceTypeId], references: [id])
+  attendances   Attendance[]
+  createdAt     DateTime     @default(now())
+
+  @@unique([serviceTypeId, date])
+}
+
+model Attendance {
+  id               String         @id @default(cuid())
+  memberId         String
+  serviceSessionId String
+  serviceTypeId    String
+  recordedById     String?
+  member           Member         @relation(fields: [memberId], references: [id])
+  serviceSession   ServiceSession @relation(fields: [serviceSessionId], references: [id])
+  serviceType      ServiceType    @relation(fields: [serviceTypeId], references: [id])
+  recordedBy       User?          @relation("RecordedBy", fields: [recordedById], references: [id])
+  createdAt        DateTime       @default(now())
+
+  @@unique([memberId, serviceSessionId])
+}
+
+model VisitationLog {
+  id          String   @id @default(cuid())
+  memberId    String
+  visitedById String?
+  visitType   String
+  visitDate   DateTime
+  notes       String?
+  outcome     String?
+  member      Member   @relation(fields: [memberId], references: [id])
+  visitedBy   User?    @relation("VisitedBy", fields: [visitedById], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model BrothersKeeperLog {
+  id          String   @id @default(cuid())
+  memberId    String
+  checkedById String?
+  checkDate   DateTime
+  notes       String?
+  outcome     String?
+  member      Member   @relation(fields: [memberId], references: [id])
+  checkedBy   User?    @relation("CheckedBy", fields: [checkedById], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model AbsenceThreshold {
+  id        String   @id @default(cuid())
+  level     String   @unique
+  months    Int
+  updatedAt DateTime @updatedAt
+}
