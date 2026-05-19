@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  experimental: {
+    turbopackMemoryLimit: 512,
+  },
 };
 
 export default nextConfig;
