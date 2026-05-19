@@ -12,10 +12,12 @@ export async function GET(req: NextRequest) {
   const zoneId = searchParams.get("zoneId");
   const communityId = searchParams.get("communityId");
   const search = searchParams.get("search");
+  const churchNumber = searchParams.get("churchNumber");
 
   const where: Record<string, unknown> = {};
   if (zoneId) where.zoneId = zoneId;
   if (communityId) where.communityId = communityId;
+  if (churchNumber) where.churchNumber = churchNumber;
   if (search) {
     where.OR = [
       { firstName: { contains: search } },

@@ -1,13 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { X, Search, Check } from "lucide-react";
-
-interface Zone {
-  id: string;
-  name: string;
-  communities: { id: string; name: string }[];
-}
+import { useState, useEffect, useRef } from "react";
+import { X, UserCheck, Trash2 } from "lucide-react";
 
 interface ServiceType {
   id: string;
@@ -30,74 +24,71 @@ interface RecordAttendanceModalProps {
 export function RecordAttendanceModal({ onClose, onSuccess }: RecordAttendanceModalProps) {
   const [step, setStep] = useState<"setup" | "record">("setup");
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
   const [serviceTypeId, setServiceTypeId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
-  const [filterZone, setFilterZone] = useState("");
-  const [search, setSearch] = useState("");
+
+  const [churchNumber, setChurchNumber] = useState("");
+  const [feedback, setFeedback] = useState<{ type: "ok" | "err"; message: string } | null>(null);
+  const [present, setPresent] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/service-types").then((r) => r.json()),
-      fetch("/api/zones").then((r) => r.json()),
-    ]).then(([st, z]) => {
-      setServiceTypes(st);
-      setZones(z);
-      if (st.length > 0) setServiceTypeId(st[0].id);
-    });
+    fetch("/api/service-types")
+      .then((r) => r.json())
+      .then((data) => {
+        setServiceTypes(data);
+        if (data.length > 0) setServiceTypeId(data[0].id);
+      });
   }, []);
-
-  const fetchMembers = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (filterZone) params.set("zoneId", filterZone);
-    if (search) params.set("search", search);
-    const res = await fetch(`/api/members?${params}`);
-    const data = await res.json();
-    setMembers(data);
-  }, [filterZone, search]);
-
-  useEffect(() => {
-    if (step === "record") fetchMembers();
-  }, [step, fetchMembers]);
 
   useEffect(() => {
     if (step === "record") {
-      const timer = setTimeout(fetchMembers, 300);
-      return () => clearTimeout(timer);
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [search, filterZone, step, fetchMembers]);
+  }, [step]);
 
-  function toggleMember(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  async function handleNumberSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const num = churchNumber.trim();
+    if (!num) return;
+
+    if (present.some((m) => m.churchNumber === num)) {
+      setFeedback({ type: "err", message: `#${num} already marked present` });
+      setChurchNumber("");
+      return;
+    }
+
+    const res = await fetch(`/api/members?churchNumber=${encodeURIComponent(num)}`);
+    const data = await res.json();
+
+    if (!data || data.length === 0) {
+      setFeedback({ type: "err", message: `No member found with number ${num}` });
+    } else {
+      const member = data[0] as Member;
+      setPresent((prev) => [...prev, member]);
+      setFeedback({ type: "ok", message: `${member.firstName} ${member.lastName} marked present` });
+    }
+
+    setChurchNumber("");
+    setTimeout(() => setFeedback(null), 2500);
+    inputRef.current?.focus();
   }
 
-  function selectAll() {
-    setSelected(new Set(members.map((m) => m.id)));
+  function removeFromPresent(id: string) {
+    setPresent((prev) => prev.filter((m) => m.id !== id));
   }
 
-  function clearAll() {
-    setSelected(new Set());
-  }
-
-  async function handleSubmit() {
-    if (selected.size === 0) return;
+  async function handleSave() {
+    if (present.length === 0) return;
     setLoading(true);
 
     const res = await fetch("/api/attendance", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        memberIds: Array.from(selected),
+        memberIds: present.map((m) => m.id),
         serviceTypeId,
         date,
         notes,
@@ -108,9 +99,11 @@ export function RecordAttendanceModal({ onClose, onSuccess }: RecordAttendanceMo
     if (res.ok) onSuccess();
   }
 
+  const serviceTypeName = serviceTypes.find((s) => s.id === serviceTypeId)?.name ?? "";
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-lg font-bold text-gray-900">Record Attendance</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -171,73 +164,88 @@ export function RecordAttendanceModal({ onClose, onSuccess }: RecordAttendanceMo
                 disabled={!serviceTypeId || !date}
                 className="flex-1 px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 disabled:opacity-60"
               >
-                Select Members →
+                Start Recording →
               </button>
             </div>
           </div>
         ) : (
           <>
-            <div className="p-4 border-b border-gray-200 space-y-3">
-              <div className="flex gap-2 flex-wrap">
-                <div className="relative flex-1 min-w-48">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search members..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <select
-                  value={filterZone}
-                  onChange={(e) => setFilterZone(e.target.value)}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">All Zones</option>
-                  {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
-                </select>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">
-                  <span className="font-semibold text-blue-700">{selected.size}</span> selected
-                  {" "}of {members.length} members
-                </span>
-                <div className="flex gap-3">
-                  <button onClick={selectAll} className="text-blue-600 hover:underline text-xs">Select All</button>
-                  <button onClick={clearAll} className="text-gray-500 hover:underline text-xs">Clear</button>
-                </div>
-              </div>
+            <div className="px-6 py-3 bg-blue-50 border-b border-blue-100">
+              <p className="text-sm font-medium text-blue-800">
+                {serviceTypeName} —{" "}
+                {new Date(date).toLocaleDateString("en-GH", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+              </p>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {members.map((member) => {
-                  const isSelected = selected.has(member.id);
-                  return (
-                    <button
-                      key={member.id}
-                      onClick={() => toggleMember(member.id)}
-                      className={`flex items-center gap-3 p-3 rounded-lg border text-left transition-colors ${
-                        isSelected
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${
-                        isSelected ? "bg-blue-600" : "border-2 border-gray-300"
-                      }`}>
-                        {isSelected && <Check size={12} className="text-white" />}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm text-gray-900 truncate">
-                          {member.firstName} {member.lastName}
-                        </p>
-                        <p className="text-xs text-gray-500 font-mono">{member.churchNumber}</p>
-                      </div>
-                    </button>
-                  );
-                })}
+            <div className="p-6 space-y-4">
+              <form onSubmit={handleNumberSubmit} className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Enter church number
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={churchNumber}
+                    onChange={(e) => setChurchNumber(e.target.value)}
+                    placeholder="e.g. 1042"
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!churchNumber.trim()}
+                    className="px-5 py-3 bg-blue-700 text-white rounded-lg font-medium hover:bg-blue-800 disabled:opacity-50"
+                  >
+                    Mark
+                  </button>
+                </div>
+
+                {feedback && (
+                  <p className={`text-sm font-medium px-3 py-2 rounded-lg ${
+                    feedback.type === "ok"
+                      ? "bg-green-50 text-green-700"
+                      : "bg-red-50 text-red-700"
+                  }`}>
+                    {feedback.type === "ok" ? "✓ " : "✗ "}{feedback.message}
+                  </p>
+                )}
+              </form>
+
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-gray-700">Present</p>
+                  <span className="text-sm font-bold text-blue-700">{present.length}</span>
+                </div>
+
+                {present.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-gray-400 text-sm">
+                    No members recorded yet. Enter a church number above.
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                    {[...present].reverse().map((member) => (
+                      <li key={member.id} className="flex items-center justify-between px-4 py-2">
+                        <div className="flex items-center gap-3">
+                          <UserCheck size={15} className="text-green-600 flex-shrink-0" />
+                          <div>
+                            <span className="text-sm font-medium text-gray-900">
+                              {member.firstName} {member.lastName}
+                            </span>
+                            <span className="ml-2 text-xs font-mono text-gray-500">#{member.churchNumber}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeFromPresent(member.id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          title="Remove"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
 
@@ -249,11 +257,11 @@ export function RecordAttendanceModal({ onClose, onSuccess }: RecordAttendanceMo
                 ← Back
               </button>
               <button
-                onClick={handleSubmit}
-                disabled={selected.size === 0 || loading}
+                onClick={handleSave}
+                disabled={present.length === 0 || loading}
                 className="flex-1 px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 disabled:opacity-60"
               >
-                {loading ? "Saving..." : `Save Attendance (${selected.size} members)`}
+                {loading ? "Saving..." : `Save — ${present.length} member${present.length !== 1 ? "s" : ""} present`}
               </button>
             </div>
           </>
