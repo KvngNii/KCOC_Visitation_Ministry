@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Search, Plus, Filter } from "lucide-react";
+import { Search, Plus, Filter, Pencil, Trash2 } from "lucide-react";
 import { AttendanceBadge } from "@/components/AttendanceBadge";
 import { computeAttendanceColor } from "@/lib/attendance-color";
 import { AddMemberModal } from "@/components/AddMemberModal";
@@ -21,10 +21,29 @@ interface Member {
   phone: string | null;
   gender: string;
   status: string;
-  zone: { name: string };
-  community: { name: string } | null;
-  ministry: { name: string } | null;
+  zone: { id: string; name: string };
+  community: { id: string; name: string } | null;
+  ministry: { id: string; name: string } | null;
   attendances: { serviceSession: { date: string } }[];
+}
+
+interface MemberFull {
+  id: string;
+  churchNumber: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  address: string | null;
+  gender: string;
+  employmentStatus: string | null;
+  status: string;
+  photoUrl: string | null;
+  zoneId: string;
+  communityId: string | null;
+  ministryId: string | null;
+  zone: { id: string; name: string };
+  community: { id: string; name: string } | null;
+  ministry: { id: string; name: string } | null;
 }
 
 export default function MembersPage() {
@@ -34,6 +53,14 @@ export default function MembersPage() {
   const [filterZone, setFilterZone] = useState("");
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editMember, setEditMember] = useState<MemberFull | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Member | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function openEdit(id: string) {
+    const res = await fetch(`/api/members/${id}`);
+    if (res.ok) setEditMember(await res.json());
+  }
 
   const fetchMembers = useCallback(async () => {
     setLoading(true);
@@ -67,6 +94,15 @@ export default function MembersPage() {
     const consistent =
       member.attendances.filter((a) => new Date(a.serviceSession.date) >= threeMonthsAgo).length >= 8;
     return computeAttendanceColor(lastDate ? new Date(lastDate) : null, consistent);
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    await fetch(`/api/members/${deleteTarget.id}`, { method: "DELETE" });
+    setDeleting(false);
+    setDeleteTarget(null);
+    fetchMembers();
   }
 
   return (
@@ -155,12 +191,28 @@ export default function MembersPage() {
                       <td className="px-4 py-3 text-gray-600 hidden xl:table-cell">{member.community?.name ?? "—"}</td>
                       <td className="px-4 py-3 text-gray-600 hidden xl:table-cell">{member.ministry?.name ?? "—"}</td>
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/members/${member.id}`}
-                          className="text-blue-600 hover:text-blue-800 font-medium text-xs"
-                        >
-                          View
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/members/${member.id}`}
+                            className="text-blue-600 hover:text-blue-800 font-medium text-xs"
+                          >
+                            View
+                          </Link>
+                          <button
+                            onClick={() => openEdit(member.id)}
+                            className="text-gray-400 hover:text-blue-600 transition-colors"
+                            title="Edit"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(member)}
+                            className="text-gray-400 hover:text-red-600 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -175,11 +227,44 @@ export default function MembersPage() {
         <AddMemberModal
           zones={zones}
           onClose={() => setShowAddModal(false)}
-          onSuccess={() => {
-            setShowAddModal(false);
-            fetchMembers();
-          }}
+          onSuccess={() => { setShowAddModal(false); fetchMembers(); }}
         />
+      )}
+
+      {editMember && (
+        <AddMemberModal
+          zones={zones}
+          member={editMember}
+          onClose={() => setEditMember(null)}
+          onSuccess={() => { setEditMember(null); fetchMembers(); }}
+        />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="font-bold text-gray-900 text-lg">Delete Member?</h3>
+            <p className="text-sm text-gray-600">
+              This will permanently delete <strong>{deleteTarget.firstName} {deleteTarget.lastName}</strong> and all
+              their records. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

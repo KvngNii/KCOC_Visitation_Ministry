@@ -1,41 +1,98 @@
-import { prisma } from "@/lib/prisma";
-import { notFound } from "next/navigation";
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
+import { ArrowLeft, Pencil, Trash2, User } from "lucide-react";
 import { computeAttendanceColor } from "@/lib/attendance-color";
 import { AttendanceBadge } from "@/components/AttendanceBadge";
-import { ArrowLeft } from "lucide-react";
+import { AddMemberModal } from "@/components/AddMemberModal";
 
-export default async function MemberDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+interface Member {
+  id: string;
+  churchNumber: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  address: string | null;
+  gender: string;
+  employmentStatus: string | null;
+  status: string;
+  photoUrl: string | null;
+  zoneId: string;
+  communityId: string | null;
+  ministryId: string | null;
+  zone: { id: string; name: string };
+  community: { id: string; name: string } | null;
+  ministry: { id: string; name: string } | null;
+  attendances: {
+    id: string;
+    serviceSession: { date: string };
+    serviceType: { name: string };
+  }[];
+  visitationLogs: {
+    id: string;
+    visitType: string;
+    visitDate: string;
+    notes: string | null;
+    outcome: string | null;
+    visitedBy: { name: string | null } | null;
+  }[];
+}
 
-  const member = await prisma.member.findUnique({
-    where: { id },
-    include: {
-      zone: true,
-      community: true,
-      ministry: true,
-      attendances: {
-        include: { serviceSession: true, serviceType: true },
-        orderBy: { serviceSession: { date: "desc" } },
-        take: 30,
-      },
-      visitationLogs: {
-        include: { visitedBy: true },
-        orderBy: { visitDate: "desc" },
-      },
-      brothersKeeperLogs: {
-        include: { checkedBy: true },
-        orderBy: { checkDate: "desc" },
-      },
-    },
-  });
+interface Zone {
+  id: string;
+  name: string;
+  communities: { id: string; name: string }[];
+}
 
-  if (!member) notFound();
+const VISIT_LABELS: Record<string, string> = {
+  SICK: "Sick Visit",
+  BEREAVED: "Bereavement",
+  BIRTH: "Birth/New Baby",
+  NEW_CONVERT: "New Convert",
+  FOLLOW_UP: "Follow-up",
+  WELFARE_CHECK: "Welfare Check",
+};
+
+export default function MemberDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const [member, setMember] = useState<Member | null>(null);
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [showEdit, setShowEdit] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const fetchMember = useCallback(async () => {
+    const res = await fetch(`/api/members/${id}`);
+    if (res.ok) setMember(await res.json());
+  }, [id]);
+
+  useEffect(() => {
+    fetchMember();
+    fetch("/api/zones").then((r) => r.json()).then(setZones);
+  }, [fetchMember]);
+
+  async function handleDelete() {
+    setDeleting(true);
+    await fetch(`/api/members/${id}`, { method: "DELETE" });
+    router.push("/members");
+  }
+
+  async function handleDeleteAttendance(attId: string) {
+    await fetch(`/api/attendance/${attId}`, { method: "DELETE" });
+    fetchMember();
+  }
+
+  if (!member) {
+    return <div className="p-8 text-center text-gray-400">Loading...</div>;
+  }
 
   const now = new Date();
   const threeMonthsAgo = new Date(now);
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-
   const lastAtt = member.attendances[0];
   const lastDate = lastAtt?.serviceSession?.date ?? null;
   const consistent = member.attendances.filter(
@@ -43,13 +100,11 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   ).length >= 8;
   const color = computeAttendanceColor(lastDate ? new Date(lastDate) : null, consistent);
 
-  const VISIT_LABELS: Record<string, string> = {
-    SICK: "Sick Visit",
-    BEREAVED: "Bereavement",
-    BIRTH: "Birth/New Baby",
-    NEW_CONVERT: "New Convert",
-    FOLLOW_UP: "Follow-up",
-    WELFARE_CHECK: "Welfare Check",
+  const memberForEdit = {
+    ...member,
+    zoneId: member.zone.id,
+    communityId: member.community?.id ?? null,
+    ministryId: member.ministry?.id ?? null,
   };
 
   return (
@@ -58,13 +113,38 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
         <Link href="/members" className="text-gray-400 hover:text-gray-600">
           <ArrowLeft size={20} />
         </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {member.firstName} {member.lastName}
-          </h1>
-          <p className="text-gray-500 text-sm">Church No: {member.churchNumber}</p>
+        <div className="flex-1 flex items-center gap-3">
+          <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-100 border border-gray-200 flex-shrink-0 relative">
+            {member.photoUrl ? (
+              <Image src={member.photoUrl} alt="Profile" fill className="object-cover" unoptimized />
+            ) : (
+              <User className="w-6 h-6 text-gray-300 absolute inset-0 m-auto" />
+            )}
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {member.firstName} {member.lastName}
+            </h1>
+            <p className="text-gray-500 text-sm">Church No: {member.churchNumber}</p>
+          </div>
+          <AttendanceBadge color={color} />
         </div>
-        <AttendanceBadge color={color} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowEdit(true)}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Pencil size={14} />
+            Edit
+          </button>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-2 px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50"
+          >
+            <Trash2 size={14} />
+            Delete
+          </button>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -72,42 +152,22 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
         <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
           <h2 className="font-semibold text-gray-900">Member Information</h2>
           <dl className="space-y-3 text-sm">
-            <div>
-              <dt className="text-gray-500">Church Number</dt>
-              <dd className="font-medium font-mono">{member.churchNumber}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Full Name</dt>
-              <dd className="font-medium">{member.firstName} {member.lastName}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Gender</dt>
-              <dd className="font-medium">{member.gender === "M" ? "Male" : "Female"}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Phone</dt>
-              <dd className="font-medium">{member.phone ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Address</dt>
-              <dd className="font-medium">{member.address ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Employment</dt>
-              <dd className="font-medium">{member.employmentStatus ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Zone</dt>
-              <dd className="font-medium">{member.zone.name}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Community</dt>
-              <dd className="font-medium">{member.community?.name ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Ministry</dt>
-              <dd className="font-medium">{member.ministry?.name ?? "—"}</dd>
-            </div>
+            {[
+              ["Church Number", <span className="font-mono">{member.churchNumber}</span>],
+              ["Full Name", `${member.firstName} ${member.lastName}`],
+              ["Gender", member.gender === "M" ? "Male" : "Female"],
+              ["Phone", member.phone ?? "—"],
+              ["Address", member.address ?? "—"],
+              ["Employment", member.employmentStatus ?? "—"],
+              ["Zone", member.zone.name],
+              ["Community", member.community?.name ?? "—"],
+              ["Ministry", member.ministry?.name ?? "—"],
+            ].map(([label, value]) => (
+              <div key={String(label)}>
+                <dt className="text-gray-500">{label}</dt>
+                <dd className="font-medium">{value}</dd>
+              </div>
+            ))}
             <div>
               <dt className="text-gray-500">Status</dt>
               <dd>
@@ -129,21 +189,27 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
           {member.attendances.length === 0 ? (
             <p className="text-gray-400 text-sm">No attendance records yet.</p>
           ) : (
-            <div className="space-y-2 max-h-80 overflow-y-auto">
+            <div className="space-y-1 max-h-80 overflow-y-auto">
               {member.attendances.map((att) => (
-                <div key={att.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0">
+                <div key={att.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0 group">
                   <div>
                     <p className="text-sm font-medium text-gray-800">{att.serviceType.name}</p>
                     <p className="text-xs text-gray-500">
                       {new Date(att.serviceSession.date).toLocaleDateString("en-GH", {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
+                        weekday: "short", month: "short", day: "numeric", year: "numeric",
                       })}
                     </p>
                   </div>
-                  <span className="w-2 h-2 bg-green-500 rounded-full" />
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 bg-green-500 rounded-full" />
+                    <button
+                      onClick={() => handleDeleteAttendance(att.id)}
+                      className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all"
+                      title="Remove attendance record"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -170,18 +236,54 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
                     </span>
                   </div>
                   {log.notes && <p className="text-gray-600 text-xs">{log.notes}</p>}
-                  {log.outcome && (
-                    <p className="text-xs text-gray-500 mt-1">Outcome: {log.outcome}</p>
-                  )}
-                  {log.visitedBy && (
-                    <p className="text-xs text-gray-400 mt-1">By: {log.visitedBy.name}</p>
-                  )}
+                  {log.outcome && <p className="text-xs text-gray-500 mt-1">Outcome: {log.outcome}</p>}
+                  {log.visitedBy && <p className="text-xs text-gray-400 mt-1">By: {log.visitedBy.name}</p>}
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Delete confirm */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="font-bold text-gray-900 text-lg">Delete Member?</h3>
+            <p className="text-sm text-gray-600">
+              This will permanently delete <strong>{member.firstName} {member.lastName}</strong> and all
+              their attendance and visitation records. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEdit && (
+        <AddMemberModal
+          zones={zones}
+          member={memberForEdit}
+          onClose={() => setShowEdit(false)}
+          onSuccess={() => {
+            setShowEdit(false);
+            fetchMember();
+          }}
+        />
+      )}
     </div>
   );
 }
